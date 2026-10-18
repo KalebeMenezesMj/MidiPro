@@ -1,0 +1,12 @@
+name: midipro_soundfonts
+description: SoundFonts SF2 embutidos do MIDI Pro.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+flutter:
+  assets:
+    - soundfonts/

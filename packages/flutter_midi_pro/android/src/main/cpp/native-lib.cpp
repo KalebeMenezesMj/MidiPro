@@ -174,6 +174,25 @@ Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_stopAllNotes(J
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_pitchBend(JNIEnv* env, jclass clazz, jint channel, jint value, jint sfId) {
+    fluid_synth_t* synth = get_synth(sfId);
+    if (synth == nullptr) {
+        return;
+    }
+    // fluid_synth_pitch_bend espera -8192..8191; o valor recebido é 14 bits (0..16383).
+    fluid_synth_pitch_bend(synth, channel, value - 8192);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_controlChange(JNIEnv* env, jclass clazz, jint channel, jint controller, jint value, jint sfId) {
+    fluid_synth_t* synth = get_synth(sfId);
+    if (synth == nullptr) {
+        return;
+    }
+    fluid_synth_cc(synth, channel, controller, value);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_unloadSoundfont(JNIEnv* env, jclass clazz, jint sfId) {
     cleanup_instance(sfId);
 }

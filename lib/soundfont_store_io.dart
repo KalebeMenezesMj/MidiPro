@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'soundfont.dart';
@@ -30,41 +29,17 @@ class SoundfontStore {
     return fonts;
   }
 
-  Future<int> importFiles(
-    List<PlatformFile> files, {
-    SoundfontImportProgress? onProgress,
-  }) async {
-    final directory = await _directory();
-    var imported = 0;
-
-    for (var index = 0; index < files.length; index++) {
-      final picked = files[index];
-      final sourcePath = picked.path;
-      if (sourcePath == null || !await _isSoundFontFile(File(sourcePath))) {
-        onProgress?.call(index + 1, files.length);
-        continue;
-      }
-
-      final filename = picked.name.split(RegExp(r'[\\/]+')).last;
-      final source = File(sourcePath);
-      final destination = File(
-        '${directory.path}${Platform.pathSeparator}$filename',
-      );
-      if (source.absolute.path.toLowerCase() ==
-          destination.absolute.path.toLowerCase()) {
-        onProgress?.call(index + 1, files.length);
-        continue;
-      }
-      await source.copy(destination.path);
-      imported++;
-      onProgress?.call(index + 1, files.length);
-    }
-    return imported;
-  }
-
   Future<Uint8List?> readData(SoundFont font) async => font.data;
 
-  /// Folder import only exists on the web build; desktop stays with files.
+  /// Grava um SoundFont vindo dos assets (usado para popular os timbres
+  /// nativos na primeira execução do Android).
+  Future<void> writeSoundfont(String filename, Uint8List data) async {
+    final directory = await _directory();
+    final file = File('${directory.path}${Platform.pathSeparator}$filename');
+    await file.writeAsBytes(data, flush: true);
+  }
+
+  /// Importação por pasta só existe na versão Web; desktop/Android usam arquivos.
   Future<int> importWebFiles(
     List<Object> files, {
     SoundfontImportProgress? onProgress,
@@ -75,17 +50,5 @@ class SoundfontStore {
   Future<void> delete(SoundFont font) async {
     final path = font.path;
     if (path != null) await File(path).delete();
-  }
-
-  Future<bool> _isSoundFontFile(File file) async {
-    try {
-      final header = <int>[];
-      await for (final chunk in file.openRead(0, 12)) {
-        header.addAll(chunk);
-      }
-      return isSoundFontData(Uint8List.fromList(header));
-    } catch (_) {
-      return false;
-    }
   }
 }

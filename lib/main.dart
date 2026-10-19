@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -186,7 +185,11 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() => _engineReady = true);
 
-      final fonts = await _library.scan();
+      var fonts = await _library.scan();
+      if (!kIsWeb) {
+        await _seedBuiltinSoundfonts(fonts);
+        fonts = await _library.scan();
+      }
       final presets = await _loadSavedPresets();
       if (!mounted) return;
       final library = kIsWeb ? mergeBuiltinSoundfonts(fonts) : fonts;
@@ -202,46 +205,22 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _importSoundfonts() async {
-    if (_importing) return;
-    setState(() => _importing = true);
-
-    try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['sf2'],
-        allowMultiple: true,
-        withData: false,
-        withReadStream: kIsWeb,
-      );
-      if (result == null || result.files.isEmpty) return;
-
-      setState(() {
-        _importProgress = 0;
-        _importTotal = result.files.length;
-      });
-      final imported = await _library.importFiles(
-        result.files,
-        onProgress: (completed, total) {
-          if (mounted) {
-            setState(() {
-              _importProgress = completed;
-              _importTotal = total;
-            });
-          }
-        },
-      );
-
-      await _completeImport(imported);
-    } catch (_) {
-      _showMessage('Não foi possível importar os SoundFonts.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _importing = false;
-          _importProgress = 0;
-          _importTotal = 0;
-        });
+  /// Copia os SoundFonts nativos dos assets para o armazenamento local na
+  /// primeira execução em Android/desktop (a Web já os lê direto dos assets).
+  Future<void> _seedBuiltinSoundfonts(List<SoundFont> existing) async {
+    final have = existing.map((font) => font.filename).toSet();
+    for (final filename in builtinSoundfontFilenames) {
+      if (have.contains(filename)) continue;
+      try {
+        final byteData =
+            await rootBundle.load('$builtinSoundfontAssetDir/$filename');
+        final data = byteData.buffer.asUint8List(
+          byteData.offsetInBytes,
+          byteData.lengthInBytes,
+        );
+        await _library.writeSoundfont(filename, data);
+      } catch (_) {
+        // Se um arquivo falhar, seguimos com os demais.
       }
     }
   }
@@ -910,10 +889,6 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
         child: SoundfontPicker(
           fonts: _soundfonts,
           selectedPath: _selected?.id,
-          onImport: () {
-            Navigator.of(sheetContext).pop();
-            unawaited(_importSoundfonts());
-          },
           onImportFolder: () {
             Navigator.of(sheetContext).pop();
             unawaited(_importSoundfontFolder());
@@ -1114,12 +1089,17 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
             constraints: const BoxConstraints(maxWidth: 900),
             child: LayoutBuilder(
               builder: (context, constraints) {
+                final compact = constraints.maxHeight < 560;
                 final keyboardHeight = (constraints.maxHeight * 0.31)
                     .clamp(168.0, 226.0)
                     .toDouble();
                 final controlsGap =
                     (constraints.maxHeight - 650).clamp(18.0, 84.0).toDouble();
                 final firstMidiNote = (_octave + 1) * 12;
+
+                if (compact) {
+                  return _buildCompactLayout(firstMidiNote: firstMidiNote);
+                }
 
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
@@ -1212,6 +1192,310 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
     );
   }
 
+  /// Layout compacto para telas baixas (celular na horizontal).
+  Widget _buildCompactLayout({required int firstMidiNote}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.accentWash,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(
+                  Icons.graphic_eq_rounded,
+                  color: AppColors.accent,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'MIDI PRO',
+                      style: TextStyle(
+                        color: AppColors.ivory,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6,
+                      ),
+                    ),
+                    _buildInstrumentChip(),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: _midiDevice == null
+                    ? 'Conectar teclado MIDI'
+                    : 'Desconectar ${_midiDevice!.name}',
+                onPressed: _connectingMidi ? null : _toggleMidiInput,
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.ivory,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11),
+                    side: BorderSide(
+                      color: _midiDevice == null
+                          ? AppColors.line
+                          : AppColors.accent,
+                    ),
+                  ),
+                ),
+                icon: _connectingMidi
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.accent,
+                        ),
+                      )
+                    : Icon(
+                        Icons.piano_rounded,
+                        color: _midiDevice == null
+                            ? AppColors.secondary
+                            : AppColors.accent,
+                      ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                tooltip: 'Efeitos, metrônomo e presets',
+                onPressed: _showStudioTools,
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.surface,
+                  foregroundColor: AppColors.ivory,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11),
+                    side: const BorderSide(color: AppColors.line),
+                  ),
+                ),
+                icon: const Icon(Icons.tune_rounded, size: 19),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.volume_down_rounded,
+                  color: AppColors.muted, size: 17),
+              Expanded(
+                child: Slider(
+                  value: _volume,
+                  min: 0,
+                  max: 1,
+                  onChanged: _setVolume,
+                ),
+              ),
+              _compactStep(
+                icon: Icons.remove_rounded,
+                onPressed: _octave > 1 ? () => setState(() => _octave--) : null,
+              ),
+              Text(
+                '$_octave',
+                style: const TextStyle(
+                  color: AppColors.ivory,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              _compactStep(
+                icon: Icons.add_rounded,
+                onPressed: _octave < 6 ? () => setState(() => _octave++) : null,
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: _sustain ? 'Soltar sustain' : 'Segurar sustain',
+                onPressed: _toggleSustain,
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  backgroundColor:
+                      _sustain ? AppColors.accentWash : AppColors.surface,
+                  foregroundColor:
+                      _sustain ? AppColors.accent : AppColors.secondary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11),
+                    side: BorderSide(
+                      color: _sustain ? AppColors.accent : AppColors.line,
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.music_note_rounded, size: 18),
+              ),
+              const SizedBox(width: 8),
+              _buildBpmPill(),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _buildPitchModCompact(),
+          const SizedBox(height: 6),
+          Expanded(
+            child: PianoKeyboard(
+              key: ValueKey(_soundfontId),
+              firstMidiNote: firstMidiNote,
+              enabled: _soundfontId != null && !_loadingFont,
+              onNoteOn: _noteOn,
+              onNoteOff: _noteOff,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            _midiDevice != null
+                ? 'MIDI · ${_midiDevice!.name}'
+                : '${_soundfonts.length} TIMBRES · ${midiNoteName(firstMidiNote)} — ${midiNoteName(firstMidiNote + 23)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted, fontSize: 9),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactStep({
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      color: AppColors.secondary,
+      disabledColor: AppColors.line,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 28, height: 30),
+      padding: EdgeInsets.zero,
+    );
+  }
+
+  Widget _buildBpmPill() {
+    return Material(
+      color: AppColors.accent,
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        onTap: _showStudioTools,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          child: Text(
+            '$_bpm',
+            style: const TextStyle(
+              color: Color(0xFF1A160C),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPitchModCompact() {
+    final pitchFraction = (_pitchBendRaw / 16383).clamp(0.0, 1.0);
+    final modFraction = (_modWheel / 127).clamp(0.0, 1.0);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          Text('PITCH', style: _eyebrowStyle),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SizedBox(
+              height: 10,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final trackWidth = constraints.maxWidth;
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: AppColors.raised,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      Container(width: 1.5, height: 10, color: AppColors.muted),
+                      Positioned(
+                        left: (trackWidth - 10) * pitchFraction,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.ivory, width: 1),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text('MOD', style: _eyebrowStyle),
+          const SizedBox(width: 6),
+          SizedBox(
+            height: 24,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 10,
+                  child: Stack(
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.raised,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      FractionallySizedBox(
+                        heightFactor: modFraction,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  '$_modWheel',
+                  style: const TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 9,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Row(
       children: [
@@ -1246,41 +1530,39 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
           ],
         ),
         const Spacer(),
-        if (kIsWeb) ...[
-          IconButton(
-            tooltip: _midiDevice == null
-                ? 'Conectar teclado MIDI'
-                : 'Desconectar ${_midiDevice!.name}',
-            onPressed: _connectingMidi ? null : _toggleMidiInput,
-            style: IconButton.styleFrom(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.ivory,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(13),
-                side: BorderSide(
-                  color: _midiDevice == null ? AppColors.line : AppColors.accent,
-                ),
+        IconButton(
+          tooltip: _midiDevice == null
+              ? 'Conectar teclado MIDI'
+              : 'Desconectar ${_midiDevice!.name}',
+          onPressed: _connectingMidi ? null : _toggleMidiInput,
+          style: IconButton.styleFrom(
+            backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.ivory,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(13),
+              side: BorderSide(
+                color: _midiDevice == null ? AppColors.line : AppColors.accent,
               ),
-              fixedSize: const Size(44, 44),
             ),
-            icon: _connectingMidi
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.accent,
-                    ),
-                  )
-                : Icon(
-                    Icons.piano_rounded,
-                    color: _midiDevice == null
-                        ? AppColors.secondary
-                        : AppColors.accent,
-                  ),
+            fixedSize: const Size(44, 44),
           ),
-          const SizedBox(width: 8),
-        ],
+          icon: _connectingMidi
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.accent,
+                  ),
+                )
+              : Icon(
+                  Icons.piano_rounded,
+                  color: _midiDevice == null
+                      ? AppColors.secondary
+                      : AppColors.accent,
+                ),
+        ),
+        const SizedBox(width: 8),
         IconButton(
           tooltip: 'Efeitos, metrônomo e presets',
           onPressed: _showStudioTools,
@@ -2240,7 +2522,6 @@ class SoundfontPicker extends StatefulWidget {
   const SoundfontPicker({
     required this.fonts,
     required this.selectedPath,
-    required this.onImport,
     required this.onImportFolder,
     required this.onDelete,
     super.key,
@@ -2248,7 +2529,6 @@ class SoundfontPicker extends StatefulWidget {
 
   final List<SoundFont> fonts;
   final String? selectedPath;
-  final VoidCallback onImport;
   final VoidCallback onImportFolder;
   final ValueChanged<SoundFont> onDelete;
 
@@ -2317,18 +2597,6 @@ class _SoundfontPickerState extends State<SoundfontPicker> {
                         ),
                       ),
                     ],
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: widget.onImport,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Importar SF2'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.accent,
-                    textStyle: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
                   ),
                 ),
                 if (kIsWeb)
@@ -2556,7 +2824,7 @@ class _SoundfontPickerState extends State<SoundfontPicker> {
             if (!noMatches) ...[
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: widget.onImport,
+                onPressed: widget.onImportFolder,
                 icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Importar timbres'),
                 style: FilledButton.styleFrom(

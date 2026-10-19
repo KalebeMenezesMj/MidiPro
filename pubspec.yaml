@@ -10,7 +10,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  file_picker: ^11.0.2
   flutter_midi_pro:
     path: packages/flutter_midi_pro
   idb_shim: ^2.10.1+1

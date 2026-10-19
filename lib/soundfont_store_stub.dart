@@ -1,16 +1,9 @@
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
-
 import 'soundfont.dart';
 
 class SoundfontStore {
   Future<List<SoundFont>> scan() async => const [];
-
-  Future<int> importFiles(
-    List<PlatformFile> files, {
-    SoundfontImportProgress? onProgress,
-  }) async => 0;
 
   Future<Uint8List?> readData(SoundFont font) async => font.data;
 
@@ -18,6 +11,8 @@ class SoundfontStore {
     List<Object> files, {
     SoundfontImportProgress? onProgress,
   }) async => 0;
+
+  Future<void> writeSoundfont(String filename, Uint8List data) async {}
 
   Future<void> delete(SoundFont font) async {}
 }

@@ -31,14 +31,6 @@ class SoundfontStore {
 
   Future<Uint8List?> readData(SoundFont font) async => font.data;
 
-  /// Grava um SoundFont vindo dos assets (usado para popular os timbres
-  /// nativos na primeira execução do Android).
-  Future<void> writeSoundfont(String filename, Uint8List data) async {
-    final directory = await _directory();
-    final file = File('${directory.path}${Platform.pathSeparator}$filename');
-    await file.writeAsBytes(data, flush: true);
-  }
-
   /// Importação por pasta só existe na versão Web; desktop/Android usam arquivos.
   Future<int> importWebFiles(
     List<Object> files, {

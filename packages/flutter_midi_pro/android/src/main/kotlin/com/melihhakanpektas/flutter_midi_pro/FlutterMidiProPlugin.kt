@@ -11,6 +11,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.AudioFormat
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.midi.MidiManager
 import android.media.midi.MidiDevice
 import android.media.midi.MidiDeviceInfo
@@ -78,6 +79,9 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
     )
 
     @JvmStatic
+    private external fun setMuted(muted: Int)
+
+    @JvmStatic
     private external fun unloadSoundfont(sfId: Int)
     @JvmStatic
     private external fun dispose()
@@ -96,6 +100,54 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
   private var clickBytes: ByteArray? = null
   private var clickAccentTrack: AudioTrack? = null
   private var clickAccentBytes: ByteArray? = null
+
+  private var audioFocusRequest: AudioFocusRequest? = null
+  private var audioFocusRequested = false
+
+  private val audioFocusChangeListener =
+    AudioManager.OnAudioFocusChangeListener { change ->
+      when (change) {
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
+        AudioManager.AUDIOFOCUS_LOSS -> setMuted(1)
+        AudioManager.AUDIOFOCUS_GAIN -> setMuted(0)
+      }
+    }
+
+  private fun ensureAudioFocus() {
+    if (audioFocusRequested) return
+    try {
+      val am = flutterPluginBinding.applicationContext
+        .getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        .setAudioAttributes(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build(),
+        )
+        .setOnAudioFocusChangeListener(audioFocusChangeListener)
+        .build()
+      val result = am.requestAudioFocus(request)
+      if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        audioFocusRequest = request
+        audioFocusRequested = true
+      }
+    } catch (_: Throwable) {
+      // Sem foco de áudio disponível; segue tocando.
+    }
+  }
+
+  private fun abandonAudioFocus() {
+    if (!audioFocusRequested) return
+    try {
+      val am = flutterPluginBinding.applicationContext
+        .getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+    } catch (_: Throwable) {}
+    audioFocusRequested = false
+    audioFocusRequest = null
+  }
 
   private fun generateClick(frequency: Double, amplitude: Double): ByteArray {
     val sampleRate = 44100
@@ -321,6 +373,7 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
         val velocity = call.argument<Int>("velocity")
         val sfId = call.argument<Int>("sfId")
         if (channel != null && key != null && velocity != null && sfId != null) {
+          ensureAudioFocus()
           playNote(channel, key, velocity, sfId)
           result.success(null)
         } else {
@@ -396,6 +449,7 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     midiEventSink = null
     closeMidiInputQuietly()
+    abandonAudioFocus()
     channel.setMethodCallHandler(null)
   }
 }

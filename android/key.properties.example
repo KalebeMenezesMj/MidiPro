@@ -1,0 +1,6 @@
+# Copie para key.properties e preencha com os dados da sua keystore.
+# O key.properties NÃO vai para o repositório.
+storePassword=SUA_SENHA
+keyPassword=SUA_SENHA
+keyAlias=midipro
+storeFile=C:/caminho/para/midipro-release.jks

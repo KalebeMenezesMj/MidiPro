@@ -79,9 +79,6 @@ class SoundfontStore {
     return null;
   }
 
-  /// Sem efeito na Web (os timbres nativos já são lidos dos assets).
-  Future<void> writeSoundfont(String filename, Uint8List data) async {}
-
   Future<void> delete(SoundFont font) async {
     final database = await _database();
     final transaction = database.transaction(_storeName, idbModeReadWrite);

@@ -12,7 +12,5 @@ class SoundfontStore {
     SoundfontImportProgress? onProgress,
   }) async => 0;
 
-  Future<void> writeSoundfont(String filename, Uint8List data) async {}
-
   Future<void> delete(SoundFont font) async {}
 }

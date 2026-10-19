@@ -185,14 +185,10 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() => _engineReady = true);
 
-      var fonts = await _library.scan();
-      if (!kIsWeb) {
-        await _seedBuiltinSoundfonts(fonts);
-        fonts = await _library.scan();
-      }
+      final fonts = await _library.scan();
       final presets = await _loadSavedPresets();
       if (!mounted) return;
-      final library = kIsWeb ? mergeBuiltinSoundfonts(fonts) : fonts;
+      final library = mergeBuiltinSoundfonts(fonts);
       setState(() {
         _soundfonts = library;
         _savedPresets = presets;
@@ -202,26 +198,6 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       if (mounted) setState(() => _engineError = error.toString());
     } finally {
       if (mounted) setState(() => _starting = false);
-    }
-  }
-
-  /// Copia os SoundFonts nativos dos assets para o armazenamento local na
-  /// primeira execução em Android/desktop (a Web já os lê direto dos assets).
-  Future<void> _seedBuiltinSoundfonts(List<SoundFont> existing) async {
-    final have = existing.map((font) => font.filename).toSet();
-    for (final filename in builtinSoundfontFilenames) {
-      if (have.contains(filename)) continue;
-      try {
-        final byteData =
-            await rootBundle.load('$builtinSoundfontAssetDir/$filename');
-        final data = byteData.buffer.asUint8List(
-          byteData.offsetInBytes,
-          byteData.lengthInBytes,
-        );
-        await _library.writeSoundfont(filename, data);
-      } catch (_) {
-        // Se um arquivo falhar, seguimos com os demais.
-      }
     }
   }
 
@@ -270,7 +246,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
   Future<void> _completeImport(int imported) async {
     final fonts = await _library.scan();
     if (!mounted) return;
-    final library = kIsWeb ? mergeBuiltinSoundfonts(fonts) : fonts;
+    final library = mergeBuiltinSoundfonts(fonts);
     setState(() => _soundfonts = library);
 
     if (library.isNotEmpty &&
@@ -287,17 +263,18 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
   }
 
   Future<int> _loadSoundfont(SoundFont font) async {
+    if (font.builtin && font.path != null) {
+      // Timbres nativos: lidos direto dos assets do pacote (em qualquer
+      // plataforma o plugin persiste os bytes num temp e carrega).
+      final byteData = await rootBundle.load(font.path!);
+      final data = byteData.buffer.asUint8List(
+        byteData.offsetInBytes,
+        byteData.lengthInBytes,
+      );
+      return _midi.loadSoundfontData(data: data, bank: 0, program: 0);
+    }
     if (kIsWeb) {
-      final Uint8List? data;
-      if (font.builtin && font.path != null) {
-        final byteData = await rootBundle.load(font.path!);
-        data = byteData.buffer.asUint8List(
-          byteData.offsetInBytes,
-          byteData.lengthInBytes,
-        );
-      } else {
-        data = await _library.readData(font) ?? font.data;
-      }
+      final data = await _library.readData(font) ?? font.data;
       if (data == null) {
         throw StateError('O SoundFont não está salvo na biblioteca.');
       }
@@ -679,8 +656,8 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
     setState(() => _volume = value);
   }
 
-  void _noteOn(int key) {
-    _playNote(key, 127);
+  void _noteOn(int key, int velocity) {
+    _playNote(key, velocity);
   }
 
   void _playNote(int key, int velocity, {int channel = 0}) {
@@ -2890,7 +2867,7 @@ class PianoKeyboard extends StatefulWidget {
   });
   final int firstMidiNote;
   final bool enabled;
-  final ValueChanged<int> onNoteOn;
+  final void Function(int note, int velocity) onNoteOn;
   final ValueChanged<int> onNoteOff;
 
   @override
@@ -2900,6 +2877,12 @@ class PianoKeyboard extends StatefulWidget {
 class _PianoKeyboardState extends State<PianoKeyboard> {
   final Map<int, int> _pointerNotes = {};
   final Set<int> _activeNotes = {};
+
+  int _velocityFor(PointerEvent event, Size size) {
+    // Tocar mais embaixo na tecla = mais forte (32..127).
+    final fraction = (event.localPosition.dy / size.height).clamp(0.0, 1.0);
+    return (32 + fraction * 95).round();
+  }
 
   void _movePointer(PointerEvent event, Size size) {
     final note = widget.enabled
@@ -2917,7 +2900,9 @@ class _PianoKeyboardState extends State<PianoKeyboard> {
     }
     if (note != null) {
       _pointerNotes[event.pointer] = note;
-      if (_activeNotes.add(note)) widget.onNoteOn(note);
+      if (_activeNotes.add(note)) {
+        widget.onNoteOn(note, _velocityFor(event, size));
+      }
     }
     setState(() {});
   }

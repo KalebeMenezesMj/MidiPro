@@ -5,6 +5,8 @@
 #include <vector>
 #include <mutex>
 #include <cmath>
+#include <atomic>
+#include <cstring>
 #include <android/log.h>
 #include <android/api-level.h>
 #include <aaudio/AAudio.h>
@@ -13,6 +15,7 @@ std::map<int, fluid_synth_t*> synths = {};
 std::map<int, fluid_settings_t*> settings = {};
 std::map<int, int> soundfonts = {};
 int nextSfId = 1;
+std::atomic<int> g_muted{0};
 
 // ---------------------------------------------------------------------------
 // DSP por instância: EQ de 3 bandas + delay, com reverb nativo do FluidSynth.
@@ -174,6 +177,10 @@ static void apply_pending_effects(Instance* inst) {
 }
 
 static void render(Instance* inst, int16_t* out, int frames) {
+    if (g_muted.load()) {
+        memset(out, 0, (size_t) frames * 2 * sizeof(int16_t));
+        return;
+    }
     apply_pending_effects(inst);
     if ((int) inst->scratchL.size() < frames) {
         inst->scratchL.resize((size_t) frames);
@@ -421,6 +428,11 @@ Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_controlChange(
         return;
     }
     fluid_synth_cc(synth, channel, controller, value);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_setMuted(JNIEnv* env, jclass clazz, jint muted) {
+    g_muted.store(muted != 0 ? 1 : 0);
 }
 
 extern "C" JNIEXPORT void JNICALL

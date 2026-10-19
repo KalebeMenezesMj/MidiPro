@@ -68,6 +68,7 @@ class PerformancePreset {
     this.treble = 0,
     this.bpm = 100,
     this.sustainSeconds = 0,
+    this.pitchBendRange = 2,
     this.layerEffects,
   });
 
@@ -86,6 +87,7 @@ class PerformancePreset {
   final double treble;
   final int bpm;
   final double sustainSeconds;
+  final double pitchBendRange;
 
   /// Efeitos por camada, na mesma ordem de [soundfontIds].
   final List<LayerEffects>? layerEffects;
@@ -103,6 +105,7 @@ class PerformancePreset {
         'treble': treble,
         'bpm': bpm,
         'sustainSeconds': sustainSeconds,
+        'pitchBendRange': pitchBendRange,
         if (layerEffects != null)
           'layerEffects': [
             for (final effects in layerEffects!) effects.toJson(),
@@ -123,6 +126,7 @@ class PerformancePreset {
         treble: (json['treble'] as num?)?.toDouble() ?? 0,
         bpm: (json['bpm'] as num?)?.toInt() ?? 100,
         sustainSeconds: (json['sustainSeconds'] as num?)?.toDouble() ?? 0,
+        pitchBendRange: (json['pitchBendRange'] as num?)?.toDouble() ?? 2,
         layerEffects: (json['layerEffects'] as List?)
             ?.whereType<Map>()
             .map((item) => LayerEffects.fromJson(

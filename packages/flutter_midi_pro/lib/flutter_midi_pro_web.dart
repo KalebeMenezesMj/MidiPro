@@ -268,6 +268,17 @@ class FlutterMidiProWeb extends FlutterMidiProPlatform {
   }
 
   @override
+  Future<void> pitchWheelSensitivity(
+    int sfId,
+    int channel,
+    double semitones,
+  ) async {
+    final synth = _synths[sfId];
+    if (synth == null) return;
+    synth.synth.midiPitchWheelSensitivity(channel.toJS, semitones.toJS);
+  }
+
+  @override
   Future<void> unloadSoundfont(int sfId) async {
     final synth = _synths.remove(sfId);
     if (synth == null) return;
@@ -360,6 +371,7 @@ extension AudioWorkletNodeSynthesizerExt on AudioWorkletNodeSynthesizer {
   external void midiNoteOff(JSAny channel, JSAny key);
   external void midiPitchBend(JSAny channel, JSAny value);
   external void midiControl(JSAny channel, JSAny controller, JSAny value);
+  external void midiPitchWheelSensitivity(JSAny channel, JSAny semitones);
   external void midiAllNotesOff(JSAny channel);
   external void midiAllSoundsOff(JSAny channel);
   external void midiSystemReset();

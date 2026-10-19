@@ -431,6 +431,17 @@ Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_controlChange(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_pitchWheelSensitivity(JNIEnv* env, jclass clazz, jint sfId, jint channel, jdouble semitones) {
+    fluid_synth_t* synth = get_synth(sfId);
+    if (synth == nullptr) {
+        return;
+    }
+    for (int c = 0; c < 16; c++) {
+        fluid_synth_pitch_wheel_sens(synth, c, (int) semitones);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_melihhakanpektas_flutter_1midi_1pro_FlutterMidiProPlugin_setMuted(JNIEnv* env, jclass clazz, jint muted) {
     g_muted.store(muted != 0 ? 1 : 0);
 }

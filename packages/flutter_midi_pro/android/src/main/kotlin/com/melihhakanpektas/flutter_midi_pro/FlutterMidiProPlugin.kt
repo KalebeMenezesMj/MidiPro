@@ -67,6 +67,9 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
     private external fun controlChange(channel: Int, controller: Int, value: Int, sfId: Int)
 
     @JvmStatic
+    private external fun pitchWheelSensitivity(sfId: Int, channel: Int, semitones: Double)
+
+    @JvmStatic
     private external fun setAudioEffects(
         sfId: Int,
         reverb: Double,
@@ -409,6 +412,13 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
         val value = call.argument<Int>("value") ?: 0
         val sfId = call.argument<Int>("sfId") ?: 1
         controlChange(channel, controller, value, sfId)
+        result.success(null)
+      }
+      "pitchWheelSensitivity" -> {
+        val sfId = call.argument<Int>("sfId") ?: 1
+        val channel = call.argument<Int>("channel") ?: 0
+        val semitones = call.argument<Double>("semitones") ?: 2.0
+        pitchWheelSensitivity(sfId, channel, semitones)
         result.success(null)
       }
       "setAudioEffects" -> {

@@ -207,6 +207,16 @@ class MidiPro {
         .controlChange(sfId, channel, controller, value);
   }
 
+  /// Define a sensibilidade da roda de pitch (em semitons) para um canal.
+  Future<void> pitchWheelSensitivity({
+    required int sfId,
+    int channel = 0,
+    required double semitones,
+  }) async {
+    return FlutterMidiProPlatform.instance
+        .pitchWheelSensitivity(sfId, channel, semitones);
+  }
+
   /// Disposes of the FlutterMidiPro instance.
   /// This should be called when the instance is no longer needed.
   /// This will stop all notes and unload all soundfonts.

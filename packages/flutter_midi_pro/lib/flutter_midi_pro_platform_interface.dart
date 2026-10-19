@@ -62,6 +62,11 @@ abstract class FlutterMidiProPlatform extends PlatformInterface {
     throw UnimplementedError('controlChange() has not been implemented.');
   }
 
+  /// Define a sensibilidade da roda de pitch (em semitons) para um canal.
+  Future<void> pitchWheelSensitivity(int sfId, int channel, double semitones) {
+    throw UnimplementedError('pitchWheelSensitivity() has not been implemented.');
+  }
+
   Future<void> dispose() {
     throw UnimplementedError('dispose() has not been implemented.');
   }

@@ -135,6 +135,9 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
   /// Posição visual da roda de pitch (14 bits, centro 8192).
   int _pitchBendRaw = 8192;
 
+  /// Sensibilidade da roda de pitch em semitons.
+  double _pitchBendRange = 2;
+
   /// Posição visual da roda de modulação (0..127).
   int _modWheel = 0;
   bool _metronomeRunning = false;
@@ -342,6 +345,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
         );
         nextLayers.add(layer);
         await _applyAudioEffectsTo(id, layer.effects);
+        _applyPitchBendRangeTo(id);
       }
       for (final layer in previousLayers) {
         await _midi.unloadSoundfont(layer.id);
@@ -388,6 +392,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       id = await _loadSoundfont(font);
       final layer = LoadedSoundfont(font: font, id: id);
       await _applyAudioEffectsTo(id, layer.effects);
+      _applyPitchBendRangeTo(id);
       if (!mounted) return;
       setState(() {
         _layers.add(layer);
@@ -505,6 +510,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       soundfontIds: _layers.map((layer) => layer.font.id).toList(),
       volume: _volume,
       bpm: _bpm,
+      pitchBendRange: _pitchBendRange,
       layerEffects: [
         for (final layer in _layers) layer.effects.copy(),
       ],
@@ -541,6 +547,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
       _metronomeRunning = false;
       _volume = preset.volume;
       _bpm = preset.bpm;
+      _pitchBendRange = preset.pitchBendRange;
     });
     // Presets antigos têm efeitos globais; novos têm efeitos por camada.
     final effects = preset.layerEffects;
@@ -719,33 +726,10 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
         _setVolume(message.value / 127);
         break;
       case MidiMessageType.pitchBend:
-        setState(() => _pitchBendRaw = message.value);
-        for (final layer in _layers) {
-          unawaited(
-            _midi
-                .pitchBend(
-                  sfId: layer.id,
-                  channel: message.channel,
-                  value: message.value,
-                )
-                .catchError((Object _) {}),
-          );
-        }
+        _applyPitchBend(message.value, channel: message.channel);
         break;
       case MidiMessageType.modulation:
-        setState(() => _modWheel = message.value);
-        for (final layer in _layers) {
-          unawaited(
-            _midi
-                .controlChange(
-                  sfId: layer.id,
-                  channel: message.channel,
-                  controller: 1,
-                  value: message.value,
-                )
-                .catchError((Object _) {}),
-          );
-        }
+        _applyModWheel(message.value, channel: message.channel);
         break;
       case MidiMessageType.allNotesOff:
         _sustainedNotes.clear();
@@ -756,6 +740,50 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
         }
         break;
     }
+  }
+
+  /// Aplica pitch bend (14 bits) a todas as camadas e atualiza o indicador.
+  void _applyPitchBend(int value, {int channel = 0}) {
+    setState(() => _pitchBendRaw = value);
+    for (final layer in _layers) {
+      unawaited(
+        _midi
+            .pitchBend(sfId: layer.id, channel: channel, value: value)
+            .catchError((Object _) {}),
+      );
+    }
+  }
+
+  /// Aplica modulação (CC1, 0..127) a todas as camadas e atualiza o indicador.
+  void _applyModWheel(int value, {int channel = 0}) {
+    setState(() => _modWheel = value);
+    for (final layer in _layers) {
+      unawaited(
+        _midi
+            .controlChange(
+              sfId: layer.id,
+              channel: channel,
+              controller: 1,
+              value: value,
+            )
+            .catchError((Object _) {}),
+      );
+    }
+  }
+
+  void _setPitchBendRange(double value) {
+    setState(() => _pitchBendRange = value);
+    for (final layer in _layers) {
+      _applyPitchBendRangeTo(layer.id);
+    }
+  }
+
+  void _applyPitchBendRangeTo(int sfId) {
+    unawaited(
+      _midi
+          .pitchWheelSensitivity(sfId: sfId, channel: 0, semitones: _pitchBendRange)
+          .catchError((Object _) {}),
+    );
   }
 
   Future<void> _toggleMidiInput() async {
@@ -1017,12 +1045,14 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
           selectedLayerId: _selectedLayerId,
           bpm: _bpm,
           metronomeRunning: _metronomeRunning,
+          pitchBendRange: _pitchBendRange,
           supportsAudioEffects:
               kIsWeb || defaultTargetPlatform == TargetPlatform.android,
           onSelectLayer: (id) => setState(() => _selectedLayerId = id),
           onLayerEffect: _setLayerEffectApplied,
           onBpm: _setBpm,
           onToggleMetronome: _toggleMetronome,
+          onPitchBendRange: _setPitchBendRange,
           onSavePreset: () {
             Navigator.of(sheetContext).pop();
             unawaited(_savePreset());
@@ -1402,30 +1432,45 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final trackWidth = constraints.maxWidth;
-                  return Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: AppColors.raised,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                      Container(width: 1.5, height: 10, color: AppColors.muted),
-                      Positioned(
-                        left: (trackWidth - 10) * pitchFraction,
-                        child: Container(
-                          width: 10,
-                          height: 10,
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (d) => _applyPitchBend(
+                        ((d.localPosition.dx / trackWidth)
+                                    .clamp(0.0, 1.0) *
+                                16383)
+                            .round()),
+                    onHorizontalDragUpdate: (d) => _applyPitchBend(
+                        ((d.localPosition.dx / trackWidth)
+                                    .clamp(0.0, 1.0) *
+                                16383)
+                            .round()),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          height: 5,
                           decoration: BoxDecoration(
-                            color: AppColors.accent,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.ivory, width: 1),
+                            color: AppColors.raised,
+                            borderRadius: BorderRadius.circular(3),
                           ),
                         ),
-                      ),
-                    ],
+                        Container(
+                            width: 1.5, height: 10, color: AppColors.muted),
+                        Positioned(
+                          left: (trackWidth - 10) * pitchFraction,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: AppColors.accent,
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: AppColors.ivory, width: 1),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   );
                 },
               ),
@@ -1438,27 +1483,36 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
             height: 24,
             child: Row(
               children: [
-                SizedBox(
-                  width: 10,
-                  child: Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.raised,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                      FractionallySizedBox(
-                        heightFactor: modFraction,
-                        child: Container(
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _applyModWheel(
+                      ((1 - (d.localPosition.dy / 24).clamp(0.0, 1.0)) * 127)
+                          .round()),
+                  onVerticalDragUpdate: (d) => _applyModWheel(
+                      ((1 - (d.localPosition.dy / 24).clamp(0.0, 1.0)) * 127)
+                          .round()),
+                  child: SizedBox(
+                    width: 10,
+                    child: Stack(
+                      alignment: Alignment.bottomCenter,
+                      children: [
+                        Container(
                           decoration: BoxDecoration(
-                            color: AppColors.accent,
+                            color: AppColors.raised,
                             borderRadius: BorderRadius.circular(3),
                           ),
                         ),
-                      ),
-                    ],
+                        FractionallySizedBox(
+                          heightFactor: modFraction,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 5),
@@ -1657,8 +1711,7 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
 
   Widget _buildPitchModIndicators() {
     final pitchFraction = (_pitchBendRaw / 16383).clamp(0.0, 1.0);
-    // FluidSynth usa ±2 semitons de pitch bend por padrão.
-    final pitchSemitones = (_pitchBendRaw - 8192) / 8192 * 2;
+    final pitchSemitones = (_pitchBendRaw - 8192) / 8192 * _pitchBendRange;
     final modFraction = (_modWheel / 127).clamp(0.0, 1.0);
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
@@ -1695,37 +1748,50 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final trackWidth = constraints.maxWidth;
-                      return Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: AppColors.raised,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                          Container(
-                            width: 2,
-                            height: 14,
-                            color: AppColors.muted,
-                          ),
-                          Positioned(
-                            left: (trackWidth - 14) * pitchFraction,
-                            child: Container(
-                              width: 14,
-                              height: 14,
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (d) => _applyPitchBend(
+                            ((d.localPosition.dx / trackWidth)
+                                        .clamp(0.0, 1.0) *
+                                    16383)
+                                .round()),
+                        onHorizontalDragUpdate: (d) => _applyPitchBend(
+                            ((d.localPosition.dx / trackWidth)
+                                        .clamp(0.0, 1.0) *
+                                    16383)
+                                .round()),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Container(
+                              height: 6,
                               decoration: BoxDecoration(
-                                color: AppColors.accent,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: AppColors.ivory,
-                                  width: 1.5,
+                                color: AppColors.raised,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                            Container(
+                              width: 2,
+                              height: 14,
+                              color: AppColors.muted,
+                            ),
+                            Positioned(
+                              left: (trackWidth - 14) * pitchFraction,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppColors.ivory,
+                                    width: 1.5,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       );
                     },
                   ),
@@ -1738,27 +1804,36 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
             height: 46,
             child: Row(
               children: [
-                SizedBox(
-                  width: 14,
-                  child: Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.raised,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      FractionallySizedBox(
-                        heightFactor: modFraction,
-                        child: Container(
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _applyModWheel(
+                      ((1 - (d.localPosition.dy / 46).clamp(0.0, 1.0)) * 127)
+                          .round()),
+                  onVerticalDragUpdate: (d) => _applyModWheel(
+                      ((1 - (d.localPosition.dy / 46).clamp(0.0, 1.0)) * 127)
+                          .round()),
+                  child: SizedBox(
+                    width: 14,
+                    child: Stack(
+                      alignment: Alignment.bottomCenter,
+                      children: [
+                        Container(
                           decoration: BoxDecoration(
-                            color: AppColors.accent,
+                            color: AppColors.raised,
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
-                      ),
-                    ],
+                        FractionallySizedBox(
+                          heightFactor: modFraction,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2001,11 +2076,13 @@ class StudioToolsSheet extends StatefulWidget {
     required this.selectedLayerId,
     required this.bpm,
     required this.metronomeRunning,
+    required this.pitchBendRange,
     required this.supportsAudioEffects,
     required this.onSelectLayer,
     required this.onLayerEffect,
     required this.onBpm,
     required this.onToggleMetronome,
+    required this.onPitchBendRange,
     required this.onSavePreset,
     required this.onLoadPreset,
     required this.onDeletePreset,
@@ -2019,11 +2096,13 @@ class StudioToolsSheet extends StatefulWidget {
   final int? selectedLayerId;
   final int bpm;
   final bool metronomeRunning;
+  final double pitchBendRange;
   final bool supportsAudioEffects;
   final ValueChanged<int> onSelectLayer;
   final ValueChanged<int> onLayerEffect;
   final ValueChanged<int> onBpm;
   final VoidCallback onToggleMetronome;
+  final ValueChanged<double> onPitchBendRange;
   final VoidCallback onSavePreset;
   final ValueChanged<PerformancePreset> onLoadPreset;
   final ValueChanged<PerformancePreset> onDeletePreset;
@@ -2037,6 +2116,7 @@ class StudioToolsSheet extends StatefulWidget {
 class _StudioToolsSheetState extends State<StudioToolsSheet> {
   late double _bpm = widget.bpm.toDouble();
   late bool _metronomeRunning = widget.metronomeRunning;
+  late double _pitchBendRange = widget.pitchBendRange;
   late int? _selectedId = widget.selectedLayerId;
 
   LoadedSoundfont? get _selectedLayer {
@@ -2051,6 +2131,7 @@ class _StudioToolsSheetState extends State<StudioToolsSheet> {
     super.didUpdateWidget(oldWidget);
     _bpm = widget.bpm.toDouble();
     _metronomeRunning = widget.metronomeRunning;
+    _pitchBendRange = widget.pitchBendRange;
     if (widget.selectedLayerId != null) {
       _selectedId = widget.selectedLayerId;
     }
@@ -2319,6 +2400,20 @@ class _StudioToolsSheetState extends State<StudioToolsSheet> {
                       divisions: 50,
                     ),
                   ],
+                  const SizedBox(height: 12),
+                  _sectionTitle('PITCH BEND'),
+                  _slider(
+                    'Alcance (semitons)',
+                    _pitchBendRange,
+                    1,
+                    24,
+                    '±${_pitchBendRange.toStringAsFixed(0)}',
+                    (value) {
+                      setState(() => _pitchBendRange = value);
+                      widget.onPitchBendRange(value);
+                    },
+                    divisions: 23,
+                  ),
                   const SizedBox(height: 12),
                   _sectionTitle('METRÔNOMO'),
                   Row(

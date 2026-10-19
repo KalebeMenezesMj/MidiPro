@@ -104,6 +104,15 @@ class MethodChannelFlutterMidiPro extends FlutterMidiProPlatform {
   }
 
   @override
+  Future<void> pitchWheelSensitivity(int sfId, int channel, double semitones) async {
+    await _channel.invokeMethod('pitchWheelSensitivity', {
+      'sfId': sfId,
+      'channel': channel,
+      'semitones': semitones,
+    });
+  }
+
+  @override
   Future<void> dispose() async {
     await _channel.invokeMethod('dispose');
   }

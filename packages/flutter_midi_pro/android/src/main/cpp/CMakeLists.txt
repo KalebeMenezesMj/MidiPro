@@ -95,4 +95,5 @@ target_link_libraries(
         libvorbisfile
         android
         log
+        aaudio
 )

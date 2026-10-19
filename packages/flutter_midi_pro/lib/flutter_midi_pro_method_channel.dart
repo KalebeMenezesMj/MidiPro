@@ -73,7 +73,10 @@ class MethodChannelFlutterMidiPro extends FlutterMidiProPlatform {
 
   @override
   Future<void> setAudioEffects(int sfId, Map<String, double> effects) async {
-    throw UnsupportedError('Audio effects are available in the browser build.');
+    await _channel.invokeMethod('setAudioEffects', {
+      'sfId': sfId,
+      'effects': effects,
+    });
   }
 
   @override

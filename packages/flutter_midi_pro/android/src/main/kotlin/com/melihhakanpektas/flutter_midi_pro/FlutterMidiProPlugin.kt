@@ -8,6 +8,9 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.EventChannel
 import android.media.AudioManager
+import android.media.AudioTrack
+import android.media.AudioFormat
+import android.media.AudioAttributes
 import android.media.midi.MidiManager
 import android.media.midi.MidiDevice
 import android.media.midi.MidiDeviceInfo
@@ -63,6 +66,18 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
     private external fun controlChange(channel: Int, controller: Int, value: Int, sfId: Int)
 
     @JvmStatic
+    private external fun setAudioEffects(
+        sfId: Int,
+        reverb: Double,
+        delay: Double,
+        delayTime: Double,
+        feedback: Double,
+        bass: Double,
+        mid: Double,
+        treble: Double,
+    )
+
+    @JvmStatic
     private external fun unloadSoundfont(sfId: Int)
     @JvmStatic
     private external fun dispose()
@@ -76,6 +91,85 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
   private var midiOutputPort: MidiOutputPort? = null
   private var midiEventSink: EventChannel.EventSink? = null
   private val mainHandler = Handler(Looper.getMainLooper())
+
+  private var clickTrack: AudioTrack? = null
+  private var clickBytes: ByteArray? = null
+  private var clickAccentTrack: AudioTrack? = null
+  private var clickAccentBytes: ByteArray? = null
+
+  private fun generateClick(frequency: Double, amplitude: Double): ByteArray {
+    val sampleRate = 44100
+    val durationMs = 40
+    val n = sampleRate * durationMs / 1000
+    val buffer = ByteArray(n * 2) // PCM 16 bits mono
+    for (i in 0 until n) {
+      val t = i.toDouble() / sampleRate
+      val env = Math.exp(-t * 110.0)
+      val sample = (Math.sin(2.0 * Math.PI * frequency * t) * env * amplitude
+        * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+      buffer[i * 2] = (sample and 0xFF).toByte()
+      buffer[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+    }
+    return buffer
+  }
+
+  private fun ensureClickTrack(accent: Boolean): AudioTrack {
+    if (accent) {
+      if (clickAccentTrack == null) {
+        clickAccentBytes = generateClick(1320.0, 0.9)
+        val minBuf = AudioTrack.getMinBufferSize(
+          44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        clickAccentTrack = AudioTrack(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build(),
+          AudioFormat.Builder()
+            .setSampleRate(44100)
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+            .build(),
+          maxOf(minBuf, clickAccentBytes!!.size),
+          AudioTrack.MODE_STATIC,
+          AudioManager.AUDIO_SESSION_ID_GENERATE,
+        )
+        clickAccentTrack!!.write(clickAccentBytes!!, 0, clickAccentBytes!!.size)
+      }
+      return clickAccentTrack!!
+    }
+    if (clickTrack == null) {
+      clickBytes = generateClick(880.0, 0.7)
+      val minBuf = AudioTrack.getMinBufferSize(
+        44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+      clickTrack = AudioTrack(
+        AudioAttributes.Builder()
+          .setUsage(AudioAttributes.USAGE_MEDIA)
+          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+          .build(),
+        AudioFormat.Builder()
+          .setSampleRate(44100)
+          .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+          .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+          .build(),
+        maxOf(minBuf, clickBytes!!.size),
+        AudioTrack.MODE_STATIC,
+        AudioManager.AUDIO_SESSION_ID_GENERATE,
+      )
+      clickTrack!!.write(clickBytes!!, 0, clickBytes!!.size)
+    }
+    return clickTrack!!
+  }
+
+  private fun playClick(accent: Boolean) {
+    try {
+      val track = ensureClickTrack(accent)
+      track.stop()
+      track.setPlaybackHeadPosition(0)
+      track.play()
+    } catch (_: Throwable) {
+      // Sem áudio para o clique; ignora.
+    }
+  }
 
   private fun getMidiManager(): MidiManager {
     if (midiManager == null) {
@@ -176,6 +270,11 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
     if (call.method == "midiDevices") { listMidiDevices(result); return }
     if (call.method == "openMidiInput") { openMidiInput(call, result); return }
     if (call.method == "closeMidiInput") { closeMidiInput(result); return }
+    if (call.method == "playClick") {
+      playClick(call.argument<Boolean>("accent") ?: false)
+      result.success(null)
+      return
+    }
 
     if (!ensureNativeLibLoaded(result)) {
       return
@@ -257,6 +356,24 @@ class FlutterMidiProPlugin: FlutterPlugin, MethodCallHandler {
         val value = call.argument<Int>("value") ?: 0
         val sfId = call.argument<Int>("sfId") ?: 1
         controlChange(channel, controller, value, sfId)
+        result.success(null)
+      }
+      "setAudioEffects" -> {
+        val sfId = call.argument<Int>("sfId") ?: 1
+        val effects = call.argument<Map<*, *>>("effects") as Map<*, *>?
+        if (effects == null) { result.success(null); return }
+        fun num(key: String, default: Double): Double =
+          (effects[key] as? Number)?.toDouble() ?: default
+        setAudioEffects(
+          sfId,
+          num("reverb", 0.0),
+          num("delay", 0.0),
+          num("delayTime", 0.28),
+          num("feedback", 0.0),
+          num("bass", 0.0),
+          num("mid", 0.0),
+          num("treble", 0.0),
+        )
         result.success(null)
       }
       "unloadSoundfont" -> {

@@ -309,17 +309,20 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
   }
 
   Future<void> _applyAudioEffectsTo(int sfId, LayerEffects effects) async {
-    if (!kIsWeb) return;
-    await _midi.setAudioEffects(
-      sfId: sfId,
-      reverb: effects.reverb,
-      delay: effects.delay,
-      delayTime: effects.delayTime,
-      feedback: effects.feedback,
-      bass: effects.bass,
-      mid: effects.mid,
-      treble: effects.treble,
-    );
+    try {
+      await _midi.setAudioEffects(
+        sfId: sfId,
+        reverb: effects.reverb,
+        delay: effects.delay,
+        delayTime: effects.delayTime,
+        feedback: effects.feedback,
+        bass: effects.bass,
+        mid: effects.mid,
+        treble: effects.treble,
+      );
+    } catch (_) {
+      // Plataformas sem efeitos nativos apenas ignoram.
+    }
   }
 
   Future<void> _selectSoundfont(SoundFont font) async {
@@ -1037,7 +1040,8 @@ class _PianoHomeState extends State<PianoHome> with WidgetsBindingObserver {
           selectedLayerId: _selectedLayerId,
           bpm: _bpm,
           metronomeRunning: _metronomeRunning,
-          supportsAudioEffects: kIsWeb,
+          supportsAudioEffects:
+              kIsWeb || defaultTargetPlatform == TargetPlatform.android,
           onSelectLayer: (id) => setState(() => _selectedLayerId = id),
           onLayerEffect: _setLayerEffectApplied,
           onBpm: _setBpm,

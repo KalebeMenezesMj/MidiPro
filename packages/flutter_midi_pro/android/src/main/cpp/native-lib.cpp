@@ -127,7 +127,7 @@ struct Instance {
 
 std::map<int, Instance*> instances = {};
 
-static const int kFrames = 512;
+static const int kFrames = 128;
 
 void fluid_log_callback(int level, const char* message, void* data) {
     __android_log_print(ANDROID_LOG_ERROR, "FluidSynth", "%s", message);
@@ -235,8 +235,15 @@ static bool open_stream(Instance* inst) {
     AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
     AAudioStreamBuilder_setDataCallback(builder, aaudioCallback, inst);
     AAudioStreamBuilder_setFramesPerDataCallback(builder, kFrames);
+    AAudioStreamBuilder_setBufferCapacityInFrames(builder, kFrames * 2);
+    AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_EXCLUSIVE);
 
     result = AAudioStreamBuilder_openStream(builder, &inst->stream);
+    if (result != AAUDIO_OK) {
+        // Alguns aparelhos não suportam modo exclusivo; tenta compartilhado.
+        AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
+        result = AAudioStreamBuilder_openStream(builder, &inst->stream);
+    }
     AAudioStreamBuilder_delete(builder);
     if (result != AAUDIO_OK || inst->stream == nullptr) {
         __android_log_print(ANDROID_LOG_ERROR, "FluidSynth",
